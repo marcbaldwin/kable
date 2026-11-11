@@ -124,7 +124,7 @@ internal class CBPeripheralCoreBluetoothPeripheral(
         _state.value = State.Connecting.Bluetooth
 
         try {
-            connection.value = central.connectPeripheral(
+            val (newConnection, alreadyConnected) = central.connectPeripheral(
                 scope.coroutineContext,
                 cbPeripheral,
                 createPeripheralDelegate(),
@@ -133,7 +133,15 @@ internal class CBPeripheralCoreBluetoothPeripheral(
                 disconnectTimeout,
                 logging,
             )
-            suspendUntil<State.Connecting.Services>()
+            connection.value = newConnection
+            if (alreadyConnected) {
+                // Restored by Core Bluetooth state restoration: the link is already up and
+                // `didConnect` will not be delivered, so proceed straight to service discovery.
+                logger.info { message = "Already connected, skipping connect" }
+                _state.value = State.Connecting.Services
+            } else {
+                suspendUntil<State.Connecting.Services>()
+            }
             discoverServices()
             configureCharacteristicObservations()
         } catch (e: Exception) {

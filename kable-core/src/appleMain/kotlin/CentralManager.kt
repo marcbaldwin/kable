@@ -7,6 +7,7 @@ import platform.CoreBluetooth.CBCentralManager
 import platform.CoreBluetooth.CBCharacteristic
 import platform.CoreBluetooth.CBCharacteristicWriteType
 import platform.CoreBluetooth.CBPeripheral
+import platform.CoreBluetooth.CBPeripheralStateConnected
 import platform.Foundation.NSData
 import kotlin.concurrent.AtomicReference
 import kotlin.coroutines.CoroutineContext
@@ -72,6 +73,16 @@ public class CentralManager internal constructor(
             .retrievePeripheralsWithIdentifiers(listOf(withIdentifier.toNSUUID()))
             .firstOrNull() as? CBPeripheral
 
+    /**
+     * Requests a connection to [peripheral], unless it is already connected.
+     *
+     * A peripheral handed back by Core Bluetooth state restoration can already be connected, in
+     * which case Core Bluetooth never delivers `didConnect` for it (not even when a connection is
+     * requested again). The returned flag is `true` in that case, so the caller knows not to wait
+     * for one.
+     *
+     * @return the [Connection] and whether [peripheral] was already connected.
+     */
     internal suspend fun connectPeripheral(
         coroutineContext: CoroutineContext,
         peripheral: CBPeripheral,
@@ -81,12 +92,14 @@ public class CentralManager internal constructor(
         disconnectTimeout: Duration,
         logging: Logging,
         options: Map<Any?, *>? = null,
-    ): Connection {
-        withContext(dispatcher) {
+    ): Pair<Connection, Boolean> {
+        val alreadyConnected = withContext(dispatcher) {
             peripheral.delegate = delegate
-            cbCentralManager.connectPeripheral(peripheral, options)
+            val isConnected = peripheral.state == CBPeripheralStateConnected
+            if (!isConnected) cbCentralManager.connectPeripheral(peripheral, options)
+            isConnected
         }
-        return Connection(
+        val connection = Connection(
             coroutineContext,
             this,
             peripheral,
@@ -97,6 +110,7 @@ public class CentralManager internal constructor(
             delegate.identifier,
             logging,
         )
+        return connection to alreadyConnected
     }
 
     internal suspend fun cancelPeripheralConnection(
